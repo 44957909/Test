@@ -1,1 +1,285 @@
-1
+#pragma once
+#include <d3d11.h>
+
+struct IAInputCompose
+{
+	enum
+	{
+		V3,
+		IAInputComposeCount,
+	};
+};
+
+class RenderInterface
+{
+public:
+	static RenderInterface &lock()
+	{
+		static RenderInterface ri;
+		return ri;
+	}
+
+	ID3D11Device *getDevice()
+	{
+		return nullptr;
+	}
+
+	ID3D11DeviceContext *getImmediateContext()
+	{
+		return nullptr;
+	}
+};
+
+class Simulator
+{
+public:
+	Simulator();
+	~Simulator();
+
+	void initialize(HWND hwnd, int width, int height);
+
+	void render();
+
+protected:
+	void renderCameraOverlappedImage();
+
+protected:
+	int mWindowWidth;
+	int mWindowHeight;
+	ID3D11Device *mDevice;
+	ID3D11DeviceContext *mImmediateContext;
+	IDXGISwapChain *mSwapChain;
+	ID3D11RenderTargetView *mSwapChainView;
+
+	ID3D11VertexShader *mVertexShader;
+	ID3D11PixelShader  *mPixelShader;
+	ID3D11Buffer       *mVertexBuffer;
+	ID3D11InputLayout  *mInputLayouts[IAInputCompose::IAInputComposeCount];
+};
+
+
+
+#include "stdafx.h"
+#include <d3d11.h>
+#include <d3dcompiler.h>
+#include <DirectXMath.h>
+#include "Simulator.h"
+
+using namespace DirectX;
+
+struct Vertex
+{
+	XMFLOAT3 position;
+};
+
+class PrimitiveBatcher
+{
+	static const int MaxVertexCount = 6 * 1024;
+public:
+	void initialize()
+	{
+		mVertexBufferSize = sizeof(Vertex) * MaxVertexCount;
+		ID3D11Device *dxDevice = RenderInterface::lock().getDevice();
+		D3D11_BUFFER_DESC vertex_buffer_desc;
+		vertex_buffer_desc.ByteWidth = mVertexBufferSize;
+		vertex_buffer_desc.Usage = D3D11_USAGE_DYNAMIC;
+		vertex_buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		vertex_buffer_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		vertex_buffer_desc.MiscFlags = 0;
+		dxDevice->CreateBuffer(&vertex_buffer_desc, NULL, &mVertexBuffer);
+
+		mCpuBuffer = new char[mVertexBufferSize];
+	}
+
+	void drawTriangle(XMFLOAT3 &v0, XMFLOAT3 &v1, XMFLOAT3 &v2)
+	{
+		*(XMFLOAT3*)(mCpuBuffer + mCpuBufferStart + sizeof(Vertex) * 0) = v0;
+		*(XMFLOAT3*)(mCpuBuffer + mCpuBufferStart + sizeof(Vertex) * 1) = v1;
+		*(XMFLOAT3*)(mCpuBuffer + mCpuBufferStart + sizeof(Vertex) * 2) = v2;
+		mVertexCount++;
+	}
+
+	void flush()
+	{
+		ID3D11DeviceContext *renderContext = RenderInterface::lock().getImmediateContext();
+		D3D11_MAPPED_SUBRESOURCE mapped_subresource;
+		D3D11_MAP mapType = D3D11_MAP_WRITE_NO_OVERWRITE;
+		if (mCpuBufferStart == 0)
+			mapType = D3D11_MAP_WRITE_DISCARD;
+		renderContext->Map(mVertexBuffer, 0, mapType, 0, &mapped_subresource);
+		memcpy(mapped_subresource.pData, mCpuBuffer + mCpuBufferStart, mCpuBufferOffset - mCpuBufferStart);
+		renderContext->Unmap(mVertexBuffer, 0);
+		UINT strides[] = { sizeof(Vertex) };
+		UINT offsets[] = { mCpuBufferStart };
+
+		renderContext->IASetVertexBuffers(0, 1, &mVertexBuffer, strides, offsets);
+		renderContext->Draw(mVertexCount, 0);
+
+		mVertexCount = 0;
+	}
+
+protected:
+	int           mVertexBufferSize;
+	char         *mCpuBuffer;
+	int           mCpuBufferStart;
+	int           mCpuBufferOffset;
+	int           mVertexCount;
+	ID3D11Buffer *mVertexBuffer;
+};
+
+class VideoCamera
+{
+public:
+	VideoCamera()
+	{
+		mFov = 90.0f / 180.0f * 3.1415926;
+		mAspect = 1920.0/1080.0;
+		mLookAt = XMFLOAT3(0, 0, 1);
+	}
+	void initialise()
+	{
+		ID3D11Device *dxDevice = RenderInterface::lock().getDevice();
+		//mImmediateContext->Map(mVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_subresource);
+		//memcpy(mapped_subresource.pData, quad, sizeof(quad));
+		//mImmediateContext->Unmap(mVertexBuffer, 0);
+	}
+
+	void update()
+	{
+		XMFLOAT3 eye = XMFLOAT3(0, 0, 0);
+		XMFLOAT3 up = XMFLOAT3(0, 1, 0);
+		XMMATRIX viewMatrix = XMMatrixLookAtLH(XMLoadFloat3(&eye), XMLoadFloat3(&mLookAt), XMLoadFloat3(&up));
+		XMMATRIX projMatrix = XMMatrixPerspectiveFovLH(mFov, mAspect, 1.0f, 1000.0f);
+		XMMATRIX viewProjMatrix = XMMatrixMultiply(viewMatrix, projMatrix);
+		XMMATRIX invViewProjMatrix = XMMatrixInverse(NULL, viewProjMatrix);
+
+		XMFLOAT3 screenCoord = XMFLOAT3(1, 1, 0.001);
+		XMVECTOR vectorWorldPos = XMVector3TransformCoord(XMLoadFloat3(&screenCoord), invViewProjMatrix);
+
+		float d = 100.0f;
+		float h = d * tan((mFov / 2.0f)) * 2;
+		float w = h * mAspect;
+		XMFLOAT3 coord = XMFLOAT3(-w / 2, h / 2, d);
+		vectorWorldPos = XMVector3Transform(XMLoadFloat3(&coord), viewProjMatrix);
+		XMFLOAT4 floatWorldPos;
+		XMStoreFloat4(&floatWorldPos, vectorWorldPos);
+		floatWorldPos.x = floatWorldPos.x / floatWorldPos.w;
+		floatWorldPos.y = floatWorldPos.y / floatWorldPos.w;
+		floatWorldPos.z = floatWorldPos.z / floatWorldPos.w;
+		int k = 0;
+	}
+
+	void renderClipPlane(ID3D11DeviceContext *renderContext, float distance)
+	{
+
+	}
+
+protected:
+	float mFov;
+	float mAspect;
+	XMFLOAT3 mLookAt;
+};
+
+Simulator::Simulator()
+{
+}
+
+
+Simulator::~Simulator()
+{
+}
+
+void Simulator::initialize(HWND hwnd, int width, int height)
+{
+	VideoCamera camera;
+	camera.update();
+	mWindowWidth = width;
+	mWindowHeight = height;
+	DXGI_SWAP_CHAIN_DESC swap_chain_desc;
+	memset(&swap_chain_desc, 0, sizeof(swap_chain_desc));
+	swap_chain_desc.BufferDesc.Width = width;
+	swap_chain_desc.BufferDesc.Height = height;
+	swap_chain_desc.BufferDesc.RefreshRate.Numerator = 60;
+	swap_chain_desc.BufferDesc.RefreshRate.Denominator = 1;
+	swap_chain_desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	swap_chain_desc.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
+	swap_chain_desc.BufferDesc.Scaling = DXGI_MODE_SCALING_STRETCHED;
+	swap_chain_desc.SampleDesc.Quality = 0;
+	swap_chain_desc.SampleDesc.Count = 1;
+	swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swap_chain_desc.BufferCount = 3;
+	swap_chain_desc.OutputWindow = hwnd;
+	swap_chain_desc.Windowed = true;
+	swap_chain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+
+	D3D_FEATURE_LEVEL featureLevels[] = { D3D_FEATURE_LEVEL_11_0 };
+	//HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_DEBUG, featureLevels, 1, D3D11_SDK_VERSION, &mDevice, NULL, &mImmediateContext);
+	HRESULT hr = D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_DEBUG, featureLevels, 1, D3D11_SDK_VERSION, 
+		&swap_chain_desc, &mSwapChain,
+		&mDevice, NULL, &mImmediateContext);
+
+	D3D11_RENDER_TARGET_VIEW_DESC render_target_view_desc;
+	render_target_view_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	render_target_view_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+	render_target_view_desc.Texture2D.MipSlice = 0;
+	ID3D11Texture2D *pRt;
+	hr = mSwapChain->GetBuffer(0, __uuidof(pRt), reinterpret_cast<void **>(&pRt));
+	mDevice->CreateRenderTargetView(pRt, &render_target_view_desc, &mSwapChainView);
+
+	ID3DBlob *vsshaderBlob;
+	ID3DBlob *errorBlob;
+	hr = D3DCompileFromFile(L"shader.hlsl", NULL, NULL, "vsmain", "vs_5_0", D3D10_SHADER_DEBUG, 0, &vsshaderBlob, &errorBlob);
+	hr = mDevice->CreateVertexShader(vsshaderBlob->GetBufferPointer(), vsshaderBlob->GetBufferSize(), NULL, &mVertexShader);
+
+	ID3DBlob *psshaderBlob;
+	hr = D3DCompileFromFile(L"shader.hlsl", NULL, NULL, "psmain", "ps_5_0", D3D10_SHADER_DEBUG, 0, &psshaderBlob, &errorBlob);
+	hr = mDevice->CreatePixelShader(psshaderBlob->GetBufferPointer(), psshaderBlob->GetBufferSize(), NULL, &mPixelShader);
+
+	D3D11_INPUT_ELEMENT_DESC input_element_desc[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+	};
+	mDevice->CreateInputLayout(input_element_desc, ARRAYSIZE(input_element_desc), vsshaderBlob->GetBufferPointer(), vsshaderBlob->GetBufferSize(), &mInputLayouts[IAInputCompose::V3]);
+	vsshaderBlob->Release();
+	psshaderBlob->Release();
+
+	Vertex quad[] = {
+		XMFLOAT3{ -0.5, 0.5, 1 }, XMFLOAT3{ 0.5, 0.5, 1 }, XMFLOAT3{ 0.5, -0.5, 1 },
+		XMFLOAT3{ -0.5, 0.5, 1 }, XMFLOAT3{ 0.5, -0.5, 1 }, XMFLOAT3{ -0.5, -0.5, 1 },
+	};
+	D3D11_BUFFER_DESC vertex_buffer_desc;
+	vertex_buffer_desc.ByteWidth = sizeof(Vertex) * 6;
+	vertex_buffer_desc.Usage = D3D11_USAGE_DYNAMIC;
+	vertex_buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	vertex_buffer_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	vertex_buffer_desc.MiscFlags = 0;
+	vertex_buffer_desc.StructureByteStride = 0;
+	mDevice->CreateBuffer(&vertex_buffer_desc, NULL, &mVertexBuffer);
+	D3D11_MAPPED_SUBRESOURCE mapped_subresource;
+	mImmediateContext->Map(mVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_subresource);
+	memcpy(mapped_subresource.pData, quad, sizeof(quad));
+	mImmediateContext->Unmap(mVertexBuffer, 0);
+}
+
+void Simulator::render()
+{
+	mImmediateContext->OMSetRenderTargets(1, &mSwapChainView, NULL);
+	D3D11_VIEWPORT vp{ 0, 0, mWindowWidth, mWindowHeight };
+	mImmediateContext->RSSetViewports(1, &vp);
+	mImmediateContext->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	renderCameraOverlappedImage();
+
+	mSwapChain->Present(1, 0);
+}
+
+void Simulator::renderCameraOverlappedImage()
+{
+	UINT strides[] = { sizeof(Vertex) };
+	UINT offsets[] = { 0 };
+	mImmediateContext->IASetVertexBuffers(0, 1, &mVertexBuffer, strides, offsets);
+	mImmediateContext->IASetInputLayout(mInputLayouts[IAInputCompose::V3]);
+	mImmediateContext->VSSetShader(mVertexShader, NULL, 0);
+	mImmediateContext->PSSetShader(mPixelShader, NULL, 0);
+	mImmediateContext->Draw(6, 0);
+}
+
