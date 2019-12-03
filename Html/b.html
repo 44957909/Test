@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Document</title>
+    <script src="js/jquery.min.js" type="text/javascript" charset="utf-8"></script>
+</head>
+
+<body>
+    <canvas id="myCanvas" width="300" height="300" style="border:1px solid #c3c3c3;">
+        Your browser does not support the canvas element.
+    </canvas>
+
+    <div>
+        上传文件 ： <input type="file" name="file" multiple id="fileId" />
+        <button type="submit" name="btn" value="提交" id="btnId" onclick="check()">提交</button>
+    </div>
+    <script type="text/javascript">
+        function check() {
+            var objFile = document.getElementById("fileId");
+            if (objFile.value == "") {
+                alert("不能空")
+            }
+            var files = $('#fileId').prop('files'); //获取到文件列表
+            console.log(files.length);
+            if (files.length == 0) {
+                alert('请选择文件');
+            }
+            else {
+                for (var i = 0; f = files[i]; i++) {
+                    var reader = new FileReader(); //新建一个FileReader
+                    reader.readAsText(files[i], "UTF-8"); //读取文件
+                    reader.onload = function (evt) { //读取完文件之后会回来这里
+                        var fileString = evt.target.result; // 读取文件内容
+                        //console.log(fileString)
+                    }
+                }
+            }
+        }
+
+
+        var status = 0;
+        function showOrHide() {
+            var c = document.getElementById("myCanvas");
+            var cxt = c.getContext("2d");
+            var x = parseInt(Math.random() * (280 - 20 + 1) + 20, 10);
+            var y = parseInt(Math.random() * (280 - 20 + 1) + 20, 10);
+            if (status == 0) {
+                show(cxt, x, y)
+                status = 1;
+            } else {
+                //hide(cxt,x,y)
+                status = 0;
+            }
+        }
+        function show(cxt, x, y) {
+
+            cxt.fillStyle = "#FF0000";
+            cxt.beginPath();
+            cxt.arc(x, y, 15, 0, Math.PI * 2, true);
+            cxt.closePath();
+            cxt.fill();
+        }
+        function hide(cxt, x, y) {
+
+            cxt.fillStyle = "#FFFFFF";
+            cxt.beginPath();
+            cxt.arc(x, y, 16, 0, Math.PI * 2, true);
+            cxt.closePath();
+            cxt.fill();
+        }
+
+        setInterval("showOrHide()", 100);
+    </script>
+</body>
+
+</html>
