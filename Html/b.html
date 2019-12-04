@@ -8,13 +8,16 @@
 </head>
 
 <body>
-    <canvas id="myCanvas" width="300" height="300" style="border:1px solid #c3c3c3;">
+    <canvas id="myCanvas" width="1024" height="768" style="border:1px solid #c3c3c3;">
         Your browser does not support the canvas element.
     </canvas>
 
     <div>
         上传文件 ： <input type="file" name="file" multiple id="fileId" />
         <button type="submit" name="btn" value="提交" id="btnId" onclick="check()">提交</button>
+    </div>
+    <div>
+        <input type="text" name="worldbound" id="worldboundId" />
     </div>
     <script type="text/javascript">
         function check() {
@@ -33,10 +36,145 @@
                     reader.readAsText(files[i], "UTF-8"); //读取文件
                     reader.onload = function (evt) { //读取完文件之后会回来这里
                         var fileString = evt.target.result; // 读取文件内容
+                        var FPSArray = parseFPSFile(fileString);
+                        drawFPSChart(FPSArray);
+                        //drawFPSChart(fileString);
                         //console.log(fileString)
                     }
                 }
             }
+        }
+
+        function ByteToHex(r)
+        {
+            var HexMap = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"];
+            var s = HexMap[(r * 255) >> 4] + HexMap[(r * 255) & 0xF];
+            return s;
+        }
+
+        function RGBToColor(r, g, b)
+        {
+            return "#" + ByteToHex(r) + ByteToHex(g) + ByteToHex(b);
+        }
+
+        function FPSSort(a, b)
+        {
+            return a.fps > b.fps;
+        }
+
+        function ParseWorldBound(stringBound)
+        {
+            //var coords = stringBound.split(" ");
+            //var minx = parseFloat(coords[i]);
+            //var miny = parseFloat(coords[i]);
+        }
+
+        function parseFPSFile(fileString)
+        {
+            var FPSArray = new Array();
+            var FPSSamples = fileString.replace("\r\n", "\n").split("\n");
+            for (var i = 0; a = FPSSamples[i]; ++i)
+            {
+                var FPSSample = FPSSamples[i].split(",");
+                if (FPSSample.length != 4)
+                {
+                    continue;
+                }
+
+                var x = parseFloat(FPSSample[0]);
+                var y = parseFloat(FPSSample[1]);
+                var z = parseFloat(FPSSample[2]);
+                var FPS = parseFloat(FPSSample[3]);
+                var NewObj = new Object();
+                NewObj.x = x;
+                NewObj.y = y;
+                NewObj.z = z;
+                NewObj.fps = FPS;
+                FPSArray.push(NewObj);                
+            }
+
+            FPSArray.sort(FPSSort);
+            return FPSArray;
+        }
+
+
+        var Minx = 0;
+        var Miny = 0;
+        var Maxx = 0;
+        var Maxy = 0;
+        function ComputeWorldBound(FPSArray)
+        {
+            Minx = Miny =  99999999999;
+            Maxx = Maxy = -99999999999;
+
+            for (var i = 0; i < FPSArray.length; ++i)
+            {
+                var x = FPSArray[i].x;
+                var y = FPSArray[i].y;
+                var z = FPSArray[i].z;
+                var FPS = FPSArray[i].fps;
+                Minx = Math.min(Minx, x);
+                Miny = Math.min(Miny, y);
+                Maxx = Math.max(Maxx, x);
+                Maxy = Math.max(Maxy, y);
+            }
+        }
+
+        function drawFPSChart(FPSArray) {
+            //var worldBound = document.getElementById("worldboundId").value;
+            ComputeWorldBound(FPSArray);
+            var c = document.getElementById("myCanvas");
+            var cxt = c.getContext("2d");
+            for (var i = 0; i < FPSArray.length; ++i)
+            {
+                var x = FPSArray[i].x;
+                var y = FPSArray[i].y;
+                var z = FPSArray[i].z;
+                var FPS = FPSArray[i].fps;
+                console.log(x);
+                console.log(y);
+                console.log(z);
+                //var color = "#FF0000";
+                var r = 0.0;
+                var g = 0.0;
+                if (FPS < 20)
+                {
+                    r = 1.0;
+                }
+                else if (FPS < 25)
+                {
+                    r = 1.0;
+                    g = 1 - (25 - FPS) / 5.0;
+
+                }
+                else if (FPS < 30)
+                {
+                    r = (30.0 - FPS) / 5.0;
+                    g = 1.0;
+                }
+                else
+                {
+                    g = 1.0;
+                }
+
+                var color = RGBToColor(r, g, 0.1);
+
+                x = (((x - Minx) / (Maxx - Minx) - 0.5) * 0.95 + 0.5) * 1024;
+                y = (((y - Miny) / (Maxy - Miny) - 0.5) * 0.95 + 0.5) * 768;
+
+                drawCircle(cxt, x, y, z, color);
+                
+            }
+
+        }
+
+        function drawCircle(cxt, x, y, z, color)
+        {
+            cxt.fillStyle = color;
+            cxt.beginPath();
+            cxt.arc(x, y, 5, 0, Math.PI * 2, true);
+            cxt.closePath();
+            cxt.fill();
         }
 
 
@@ -71,7 +209,7 @@
             cxt.fill();
         }
 
-        setInterval("showOrHide()", 100);
+        //setInterval("showOrHide()", 100);
     </script>
 </body>
 
